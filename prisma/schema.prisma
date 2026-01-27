@@ -1,0 +1,658 @@
+// Kinerta Backend - Prisma Schema
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// ENUMS
+// =============================================
+
+enum UserRole {
+  CLIENT
+  TRAINER
+  PHYSIO
+  BOTH
+}
+
+enum RelationshipStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkoutSessionStatus {
+  SCHEDULED
+  COMPLETED
+  SKIPPED
+  INCOMPLETE
+}
+
+// =============================================
+// USER & AUTH
+// =============================================
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  password        String
+  role            UserRole  @default(CLIENT)
+  fullName        String?
+  avatarUrl       String?
+  phoneCountry    String?
+  phoneNumber     String?
+  country         String?
+  city            String?
+  dateOfBirth     DateTime?
+  gender          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  clientProfile   ClientProfile?
+  trainerProfile  TrainerProfile?
+  workoutSessions UserWorkoutSession[]
+  clientWorkoutSessions WorkoutSession[] @relation("ClientWorkoutSessions")
+  bodyMeasurements BodyMeasurement[]
+  notifications   Notification[]
+  deviceTokens    DeviceToken[]
+  sentMessages    Message[] @relation("SentMessages")
+  conversations   ConversationParticipant[]
+  trainerReviews  TrainerReview[] @relation("ClientReviews")
+
+  // Stripe relations
+  stripeAccount        StripeAccount?
+  pricingPlans         PricingPlan[]
+  clientSubscriptions  StripeSubscription[] @relation("ClientStripeSubscriptions")
+  trainerSubscriptions StripeSubscription[] @relation("TrainerStripeSubscriptions")
+  payouts              Payout[]
+}
+
+// =============================================
+// CLIENT PROFILE
+// =============================================
+
+model ClientProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  mainGoal       String?
+  experienceLevel String?
+  daysPerWeek    Int?
+  hasMedicalIssues Boolean @default(false)
+  medicalNotes   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  trainerRelationships TrainerClientRelationship[] @relation("ClientRelationships")
+  assignedPlans  Plan[] @relation("ClientPlans")
+}
+
+// =============================================
+// TRAINER PROFILE
+// =============================================
+
+model TrainerProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  headline        String?
+  bio             String?
+  yearsExperience Int?
+  remoteAvailable Boolean  @default(true)
+  acceptsInGym    Boolean  @default(true)
+  baseCity        String?
+  baseCountry     String?
+  sessionPriceMin Float?
+  sessionPriceMax Float?
+  currency        String   @default("USD")
+  avgRating       Float    @default(0)
+  totalReviews    Int      @default(0)
+  instagramHandle String?
+  whatsappNumber  String?
+  isVerified      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  specialties     TrainerSpecialty[]
+  certifications  TrainerCertification[]
+  gymAffiliations TrainerGym[]
+  plans           Plan[]
+  workouts        Workout[]
+  videos          TrainerVideo[]
+  reviews         TrainerReview[]
+  clientRelationships TrainerClientRelationship[] @relation("TrainerRelationships")
+}
+
+model TrainerSpecialty {
+  id         String @id @default(uuid())
+  trainerId  String
+  trainer    TrainerProfile @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  specialty  String
+
+  @@unique([trainerId, specialty])
+}
+
+model TrainerCertification {
+  id         String    @id @default(uuid())
+  trainerId  String
+  trainer    TrainerProfile @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  name       String
+  issuer     String?
+  issuedAt   DateTime?
+  expiresAt  DateTime?
+}
+
+// =============================================
+// BODY MEASUREMENTS
+// =============================================
+
+model BodyMeasurement {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source       String   @default("manual") // manual, apple_health, google_fit
+  measuredAt   DateTime @default(now())
+  weightKg     Float?
+  heightCm     Float?
+  bodyFatPct   Float?
+  chestCm      Float?
+  waistCm      Float?
+  hipsCm       Float?
+  leftArmCm    Float?
+  rightArmCm   Float?
+  leftThighCm  Float?
+  rightThighCm Float?
+  leftCalfCm   Float?
+  rightCalfCm  Float?
+  notes        String?
+}
+
+// =============================================
+// GYMS
+// =============================================
+
+model Gym {
+  id            String   @id @default(uuid())
+  name          String
+  googlePlaceId String?
+  address       String?
+  area          String?
+  city          String?
+  country       String   @default("Lebanon")
+  latitude      Float?
+  longitude     Float?
+  phone         String?
+  whatsapp      String?
+  website       String?
+  openingHours  Json?
+  isOpenNow     Boolean  @default(false)
+  tags          String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  trainers      TrainerGym[]
+}
+
+model TrainerGym {
+  id           String @id @default(uuid())
+  trainerId    String
+  trainer      TrainerProfile @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  gymId        String
+  gym          Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  relationship String? // employed, freelance, visits
+  notes        String?
+
+  @@unique([trainerId, gymId])
+}
+
+// =============================================
+// EXERCISES & MUSCLES
+// =============================================
+
+model Muscle {
+  id          String @id @default(uuid())
+  name        String
+  side        String? // front, back
+  description String?
+  icon        String?
+
+  // Relations
+  primaryExercises Exercise[] @relation("PrimaryMuscle")
+  secondaryExercises ExerciseMuscle[]
+}
+
+model Exercise {
+  id              String @id @default(uuid())
+  name            String
+  primaryMuscleId String?
+  primaryMuscle   Muscle? @relation("PrimaryMuscle", fields: [primaryMuscleId], references: [id])
+  equipment       String?
+  difficulty      String? // beginner, intermediate, advanced
+  steps           Json?   // array of strings
+  tips            Json?   // array of strings
+  icon            String?
+
+  // Relations
+  secondaryMuscles ExerciseMuscle[]
+  workoutExercises WorkoutExercise[]
+  videos           TrainerVideo[]
+  setLogs          UserSetLog[]
+}
+
+model ExerciseMuscle {
+  id         String @id @default(uuid())
+  exerciseId String
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  muscleId   String
+  muscle     Muscle @relation(fields: [muscleId], references: [id], onDelete: Cascade)
+  role       String @default("secondary") // primary, secondary, stabilizer
+
+  @@unique([exerciseId, muscleId, role])
+}
+
+// =============================================
+// PLANS & WORKOUTS
+// =============================================
+
+model Plan {
+  id            String   @id @default(uuid())
+  trainerId     String?
+  trainer       TrainerProfile? @relation(fields: [trainerId], references: [id])
+  clientId      String?
+  client        ClientProfile? @relation("ClientPlans", fields: [clientId], references: [id])
+  title         String
+  description   String?
+  durationWeeks Int      @default(1)
+  isTemplate    Boolean  @default(false)
+  basePrice     Float?
+  currency      String   @default("USD")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  weeks         PlanWeek[]
+  workouts      Workout[] @relation("PlanWorkouts")
+  subscriptions Subscription[]
+  reviews       TrainerReview[]
+  clientRelationships TrainerClientRelationship[]
+}
+
+model PlanWeek {
+  id         String @id @default(uuid())
+  planId     String
+  plan       Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  weekNumber Int
+  notes      String?
+
+  // Relations
+  workouts   PlanWeekWorkout[]
+}
+
+model Workout {
+  id              String   @id @default(uuid())
+  trainerId       String?
+  trainer         TrainerProfile? @relation(fields: [trainerId], references: [id])
+  planId          String?
+  plan            Plan? @relation("PlanWorkouts", fields: [planId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  isPublic        Boolean  @default(false)
+  estimatedMinutes Int?
+  orderIndex      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  exercises       WorkoutExercise[]
+  planWeekWorkouts PlanWeekWorkout[]
+  userSessions    UserWorkoutSession[]
+  workoutSessions WorkoutSession[] @relation("WorkoutSessions")
+}
+
+model PlanWeekWorkout {
+  id          String @id @default(uuid())
+  planWeekId  String
+  planWeek    PlanWeek @relation(fields: [planWeekId], references: [id], onDelete: Cascade)
+  workoutId   String
+  workout     Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int    // 1=Mon ... 7=Sun
+  orderIndex  Int
+  notes       String?
+}
+
+model WorkoutExercise {
+  id          String @id @default(uuid())
+  workoutId   String
+  workout     Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exerciseId  String
+  exercise    Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  name        String?  // Denormalized name for quick display
+  orderIndex  Int
+  sets        Int?
+  reps        String?  // String to allow "8-12" or "AMRAP"
+  repsMin     Int?
+  repsMax     Int?
+  restSeconds Int?
+  tempo       String?
+  notes       String?
+  videoUrl    String?  // Link to exercise demo video
+
+  // Relations
+  setLogs     SetLog[]
+}
+
+// =============================================
+// TRAINER-CLIENT RELATIONSHIPS
+// =============================================
+
+model TrainerClientRelationship {
+  id            String   @id @default(uuid())
+  trainerId     String
+  trainer       TrainerProfile @relation("TrainerRelationships", fields: [trainerId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        ClientProfile @relation("ClientRelationships", fields: [clientId], references: [id], onDelete: Cascade)
+  status        RelationshipStatus @default(PENDING)
+  startedAt     DateTime?
+  endedAt       DateTime?
+  currentPlanId String?
+  currentPlan   Plan? @relation(fields: [currentPlanId], references: [id])
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  subscriptions Subscription[]
+  conversations Conversation[]
+}
+
+model Subscription {
+  id                     String   @id @default(uuid())
+  trainerClientId        String
+  trainerClient          TrainerClientRelationship @relation(fields: [trainerClientId], references: [id], onDelete: Cascade)
+  planId                 String?
+  plan                   Plan? @relation(fields: [planId], references: [id])
+  billingCycle           String?  // one_time, monthly, custom
+  price                  Float?
+  currency               String   @default("USD")
+  status                 String?  // pending, active, expired, refunded, cancelled
+  provider               String?  // stripe, in_app_purchase
+  providerSubscriptionId String?
+  startedAt              DateTime?
+  renewedAt              DateTime?
+  expiresAt              DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+// =============================================
+// WORKOUT TRACKING
+// =============================================
+
+model UserWorkoutSession {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutId       String?
+  workout         Workout? @relation(fields: [workoutId], references: [id])
+  scheduledDate   DateTime?
+  performedAt     DateTime?
+  status          WorkoutSessionStatus @default(SCHEDULED)
+  clientNotes     String?
+  coachFeedback   String?
+  painFlag        Boolean  @default(false)
+  painDescription String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  setLogs         UserSetLog[]
+}
+
+model UserSetLog {
+  id                    String   @id @default(uuid())
+  userWorkoutSessionId  String
+  userWorkoutSession    UserWorkoutSession @relation(fields: [userWorkoutSessionId], references: [id], onDelete: Cascade)
+  exerciseId            String
+  exercise              Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  setNumber             Int
+  weightKg              Float?
+  reps                  Int?
+  rpe                   Float?   // Rating of Perceived Exertion (1-10)
+  notes                 String?
+  createdAt             DateTime @default(now())
+}
+
+// =============================================
+// CHAT
+// =============================================
+
+model Conversation {
+  id                String   @id @default(uuid())
+  trainerClientId   String?
+  trainerClient     TrainerClientRelationship? @relation(fields: [trainerClientId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  participants      ConversationParticipant[]
+  messages          Message[]
+}
+
+model ConversationParticipant {
+  id             String @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String? // trainer, client
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  ciphertext     String   // encrypted message body
+  messageType    String   @default("text") // text, image, video, file
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  readAt         DateTime?
+}
+
+// =============================================
+// TRAINER VIDEOS
+// =============================================
+
+model TrainerVideo {
+  id              String   @id @default(uuid())
+  trainerId       String
+  trainer         TrainerProfile @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  videoUrl        String
+  thumbnailUrl    String?
+  durationSeconds Int?
+  isPublic        Boolean  @default(true)
+  price           Float?   // null/0 if free
+  currency        String   @default("USD")
+  exerciseId      String?
+  exercise        Exercise? @relation(fields: [exerciseId], references: [id])
+  viewCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// =============================================
+// REVIEWS
+// =============================================
+
+model TrainerReview {
+  id         String   @id @default(uuid())
+  trainerId  String
+  trainer    TrainerProfile @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  clientId   String
+  client     User @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
+  planId     String?
+  plan       Plan? @relation(fields: [planId], references: [id])
+  rating     Int      // 1-5
+  title      String?
+  comment    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([trainerId, clientId, planId])
+}
+
+// =============================================
+// NOTIFICATIONS & DEVICE TOKENS
+// =============================================
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String   // "ios" or "android"
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // pain_flag, workout_complete, message, plan_update
+  title     String
+  body      String?
+  relatedId String?  // ID of the related entity (e.g., workoutSessionId, clientId)
+  data      Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// =============================================
+// WORKOUT LOGGING (Client Session Tracking)
+// =============================================
+
+model WorkoutSession {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation("ClientWorkoutSessions", fields: [userId], references: [id], onDelete: Cascade)
+  workoutId   String
+  workout     Workout   @relation("WorkoutSessions", fields: [workoutId], references: [id], onDelete: Cascade)
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  status      String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
+
+  logs        SetLog[]
+  feedback    String?   // General notes from client
+  painFlag    Boolean   @default(false)
+  painDetails String?
+}
+
+model SetLog {
+  id                String         @id @default(uuid())
+  sessionId         String
+  session           WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  workoutExerciseId String
+  workoutExercise   WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  setNumber         Int
+  weight            Float?
+  reps              Int?
+  rpe               Int?           // Rate of Perceived Exertion (1-10)
+  isCompleted       Boolean        @default(false)
+}
+
+// =============================================
+// STRIPE PAYMENTS
+// =============================================
+
+model StripeAccount {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeAccountId String   @unique
+  status          String   @default("pending") // pending, active, restricted
+  chargesEnabled  Boolean  @default(false)
+  payoutsEnabled  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PricingPlan {
+  id          String   @id @default(uuid())
+  trainerId   String
+  trainer     User     @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Int      // in cents (e.g., 9999 = $99.99)
+  currency    String   @default("usd")
+  interval    String   // month, week, one_time
+  duration    Int?     // weeks (for programs)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stripeSubscriptions StripeSubscription[]
+}
+
+model StripeSubscription {
+  id              String    @id @default(uuid())
+  clientId        String
+  client          User      @relation("ClientStripeSubscriptions", fields: [clientId], references: [id], onDelete: Cascade)
+  trainerId       String
+  trainer         User      @relation("TrainerStripeSubscriptions", fields: [trainerId], references: [id], onDelete: Cascade)
+  planId          String
+  plan            PricingPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  stripeSubId     String?   @unique
+  stripeCustomerId String?
+  status          String    @default("active") // active, canceled, past_due, paused
+  startDate       DateTime  @default(now())
+  endDate         DateTime?
+  canceledAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  payments        StripePayment[]
+}
+
+model StripePayment {
+  id              String   @id @default(uuid())
+  subscriptionId  String
+  subscription    StripeSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  stripePaymentId String   @unique
+  amount          Int      // in cents
+  currency        String   @default("usd")
+  status          String   // succeeded, pending, failed
+  receiptUrl      String?
+  createdAt       DateTime @default(now())
+}
+
+model Payout {
+  id              String    @id @default(uuid())
+  trainerId       String
+  trainer         User      @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  stripePayoutId  String    @unique
+  amount          Int       // in cents
+  currency        String    @default("usd")
+  status          String    // pending, in_transit, paid, failed, canceled
+  arrivalDate     DateTime?
+  createdAt       DateTime  @default(now())
+}
