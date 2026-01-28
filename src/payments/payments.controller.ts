@@ -4,6 +4,7 @@ import {
   Get,
   Put,
   Delete,
+  Patch,
   Param,
   Body,
   Query,
@@ -15,7 +16,9 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { AuthenticatedRequest } from '../auth/types/jwt-payload';
+import { TrainerEarningsService } from '../analytics/trainer-earnings.service';
 import Stripe from 'stripe';
 
 class CreatePlanDto {
@@ -35,7 +38,10 @@ class UpdatePlanDto {
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly earningsService: TrainerEarningsService,
+  ) {}
 
   // =============================================
   // STRIPE CONNECT (Trainer)
@@ -258,5 +264,153 @@ export class PaymentsController {
       console.error('Webhook error:', error);
       return { received: false, error: error.message };
     }
+  }
+
+  // =============================================
+  // WHISH MONEY (Lebanon) - Client
+  // =============================================
+
+  // Submit Whish payment receipt
+  @Post('whish')
+  @UseGuards(JwtAuthGuard)
+  submitWhishPayment(
+    @Request() req: AuthenticatedRequest,
+    @Body()
+    dto: {
+      trainerId: string;
+      planId?: string;
+      amount: number;
+      receiptUrl: string;
+      whishReference?: string;
+    },
+  ) {
+    return this.paymentsService.submitWhishPayment(req.user.userId, dto);
+  }
+
+  // Get my Whish payment history
+  @Get('whish')
+  @UseGuards(JwtAuthGuard)
+  getMyWhishPayments(@Request() req: AuthenticatedRequest) {
+    return this.paymentsService.getClientWhishPayments(req.user.userId);
+  }
+
+  // =============================================
+  // ADMIN - Finance Dashboard
+  // =============================================
+
+  // Get admin statistics
+  @Get('admin/stats')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getAdminStats() {
+    return this.paymentsService.getAdminStats();
+  }
+
+  // Get pending Whish payments
+  @Get('admin/pending')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getPendingPayments() {
+    return this.paymentsService.getPendingWhishPayments();
+  }
+
+  // Approve a Whish payment
+  @Patch('admin/:id/approve')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  approvePayment(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') paymentId: string,
+  ) {
+    return this.paymentsService.approveWhishPayment(paymentId, req.user.userId);
+  }
+
+  // Reject a Whish payment
+  @Patch('admin/:id/reject')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  rejectPayment(
+    @Param('id') paymentId: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.paymentsService.rejectWhishPayment(paymentId, dto.reason);
+  }
+
+  // Get all trainer payouts
+  @Get('admin/payouts')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getTrainerPayouts() {
+    return this.paymentsService.getTrainerPayouts();
+  }
+
+  // Mark payout as paid
+  @Patch('admin/payouts/:id/paid')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  markPayoutPaid(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') payoutId: string,
+    @Body() dto: { notes?: string },
+  ) {
+    return this.paymentsService.markPayoutPaid(payoutId, req.user.userId, dto.notes);
+  }
+
+  // =============================================
+  // ADMIN - Trainer Earnings & Payouts
+  // =============================================
+
+  // Get all trainers' earnings summary
+  @Get('admin/trainer-earnings')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getAllTrainerEarnings() {
+    return this.earningsService.getAllTrainerEarnings();
+  }
+
+  // Get specific trainer's earnings
+  @Get('admin/trainer-earnings/:trainerId')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getTrainerEarnings(@Param('trainerId') trainerId: string) {
+    return this.earningsService.getTrainerEarnings(trainerId);
+  }
+
+  // Get platform earnings summary
+  @Get('admin/platform-earnings')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getPlatformEarnings() {
+    return this.earningsService.getPlatformEarningsSummary();
+  }
+
+  // Record a new payout to trainer
+  @Post('admin/trainer-payout')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  recordTrainerPayout(
+    @Body() dto: { trainerId: string; amount: number; method: string; notes?: string },
+  ) {
+    return this.earningsService.recordPayout(
+      dto.trainerId,
+      dto.amount,
+      dto.method,
+      dto.notes,
+    );
+  }
+
+  // Mark trainer payout as sent/paid
+  @Patch('admin/trainer-payout/:payoutId/paid')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  markTrainerPayoutPaid(
+    @Request() req: AuthenticatedRequest,
+    @Param('payoutId') payoutId: string,
+    @Body() dto: { notes?: string },
+  ) {
+    return this.earningsService.markPayoutAsPaid(payoutId, req.user.userId, dto.notes);
+  }
+
+  // Cancel a pending payout
+  @Delete('admin/trainer-payout/:payoutId')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  cancelTrainerPayout(@Param('payoutId') payoutId: string) {
+    return this.earningsService.cancelPayout(payoutId);
+  }
+
+  // Get trainer's payout history
+  @Get('admin/trainer-payout/:trainerId/history')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getTrainerPayoutHistory(@Param('trainerId') trainerId: string) {
+    return this.earningsService.getTrainerPayoutHistory(trainerId);
   }
 }

@@ -36,6 +36,10 @@ export class CompleteSessionDto {
   @IsString()
   workoutId: string;
 
+  @IsOptional()
+  @IsString()
+  planWeekWorkoutId?: string; // Track which specific day's workout
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SetLogDto)

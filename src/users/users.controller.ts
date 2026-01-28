@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Body,
   Param,
   HttpCode,
@@ -14,8 +15,10 @@ import { UsersService } from './users.service';
 import { ClientSetupDto } from './dto/client-setup.dto';
 import { TrainerSetupDto } from './dto/trainer-setup.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../auth/types/jwt-payload';
+import { CurrentUser, JwtUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('users')
 export class UsersController {
@@ -25,6 +28,15 @@ export class UsersController {
   @Get('me')
   async getMe(@Request() req: AuthenticatedRequest) {
     return this.usersService.findById(req.user.userId);
+  }
+
+  @Patch('role')
+  @UseGuards(JwtAuthGuard)
+  async updateRole(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: UpdateUserRoleDto,
+  ) {
+    return this.usersService.setUserRole(user.userId, dto.role);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -1,9 +1,73 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateTrainerProfileDto } from './dto/update-trainer-profile.dto';
 
 @Injectable()
 export class TrainersService {
   constructor(private prisma: PrismaService) {}
+
+  async upsertTrainerProfile(userId: string, dto: UpdateTrainerProfileDto) {
+    // 1. Upsert trainer profile
+    const trainer = await this.prisma.trainerProfile.upsert({
+      where: { userId },
+      update: {
+        headline: dto.headline,
+        bio: dto.bio,
+        yearsExperience: dto.yearsExperience,
+        remoteAvailable: dto.remoteAvailable,
+        acceptsInGym: dto.acceptsInGym,
+        baseCity: dto.baseCity,
+        baseCountry: dto.baseCountry,
+        sessionPriceMin: dto.sessionPriceMin,
+        sessionPriceMax: dto.sessionPriceMax,
+        currency: dto.currency ?? 'USD',
+        instagramHandle: dto.instagramHandle,
+        whatsappNumber: dto.whatsappNumber,
+      },
+      create: {
+        userId,
+        headline: dto.headline,
+        bio: dto.bio,
+        yearsExperience: dto.yearsExperience,
+        remoteAvailable: dto.remoteAvailable ?? true,
+        acceptsInGym: dto.acceptsInGym ?? true,
+        baseCity: dto.baseCity,
+        baseCountry: dto.baseCountry,
+        sessionPriceMin: dto.sessionPriceMin,
+        sessionPriceMax: dto.sessionPriceMax,
+        currency: dto.currency ?? 'USD',
+        instagramHandle: dto.instagramHandle,
+        whatsappNumber: dto.whatsappNumber,
+      },
+    });
+
+    // 2. Handle specialties (replace all with new ones)
+    if (dto.specialties && Array.isArray(dto.specialties)) {
+      // Delete existing specialties
+      await this.prisma.trainerSpecialty.deleteMany({
+        where: { trainerId: trainer.id },
+      });
+
+      // Create new specialties
+      if (dto.specialties.length > 0) {
+        await this.prisma.trainerSpecialty.createMany({
+          data: dto.specialties.map((specialty) => ({
+            trainerId: trainer.id,
+            specialty,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    // 3. Return trainer with specialties
+    return this.prisma.trainerProfile.findUnique({
+      where: { userId },
+      include: {
+        specialties: true,
+      },
+    });
+  }
 
   // Dashboard Stats for Trainer
   async getDashboardStats(trainerUserId: string) {
@@ -11,8 +75,19 @@ export class TrainersService {
       where: { userId: trainerUserId },
     });
 
+    // Return empty dashboard if trainer profile doesn't exist yet
+    // (user selected TRAINER role but hasn't completed onboarding)
     if (!trainer) {
-      throw new NotFoundException('Trainer profile not found');
+      return {
+        stats: {
+          activeClients: 0,
+          revenue: '0',
+          pendingRequests: 0,
+          painFlags: 0,
+        },
+        clients: [],
+        painFlaggedSessions: [],
+      };
     }
 
     // 1. Count Active Clients
@@ -129,7 +204,7 @@ export class TrainersService {
       },
       clients: clients.map((c) => ({
         id: c.client.id,
-        odId: c.client.user.id,
+        userId: c.client.user.id,
         name: c.client.user.fullName || c.client.user.email.split('@')[0],
         email: c.client.user.email,
         avatarUrl: c.client.user.avatarUrl,
@@ -253,5 +328,95 @@ export class TrainersService {
         currentPlan: true,
       },
     });
+  }
+
+  /**
+   * Get detailed client info for trainer management screen
+   */
+  async getClientDetails(trainerUserId: string, clientProfileId: string) {
+    // Get trainer profile
+    const trainer = await this.prisma.trainerProfile.findUnique({
+      where: { userId: trainerUserId },
+    });
+
+    if (!trainer) {
+      throw new NotFoundException('Trainer profile not found');
+    }
+
+    // Get the client relationship to verify trainer has access
+    const relationship = await this.prisma.trainerClientRelationship.findFirst({
+      where: {
+        trainerId: trainer.id,
+        clientId: clientProfileId,
+      },
+      include: {
+        client: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+        currentPlan: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    if (!relationship) {
+      throw new ForbiddenException('Client not found or not assigned to this trainer');
+    }
+
+    // Get recent workout sessions
+    const recentSessions = await this.prisma.workoutSession.findMany({
+      where: {
+        userId: relationship.client.userId,
+      },
+      include: {
+        workout: {
+          select: {
+            title: true,
+          },
+        },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 5,
+    });
+
+    // Get or create conversation
+    let conversationId: string | null = null;
+    const conversation = await this.prisma.conversation.findFirst({
+      where: {
+        AND: [
+          { participants: { some: { userId: trainerUserId } } },
+          { participants: { some: { userId: relationship.client.userId } } },
+        ],
+      },
+    });
+    conversationId = conversation?.id || null;
+
+    return {
+      id: relationship.client.id,
+      fullName: relationship.client.user.fullName || relationship.client.user.email.split('@')[0],
+      email: relationship.client.user.email,
+      avatarUrl: relationship.client.user.avatarUrl,
+      currentPlan: relationship.currentPlan?.title || null,
+      currentPlanId: relationship.currentPlan?.id || null,
+      lastWorkoutAt: recentSessions[0]?.startedAt || null,
+      conversationId,
+      recentActivity: recentSessions.map((session) => ({
+        id: session.id,
+        workoutName: session.workout?.title || 'Workout',
+        date: session.startedAt,
+      })),
+    };
   }
 }

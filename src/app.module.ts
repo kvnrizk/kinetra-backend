@@ -8,6 +8,10 @@ import { ProgramsModule } from './programs/programs.module';
 import { LoggingModule } from './logging/logging.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ChatModule } from './chat/chat.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { RetentionModule } from './retention/retention.module';
+import { CronModule } from './cron/cron.module';
 
 @Module({
   imports: [
@@ -20,6 +24,10 @@ import { PaymentsModule } from './payments/payments.module';
     LoggingModule,
     NotificationsModule,
     PaymentsModule,
+    ChatModule,
+    AnalyticsModule,
+    RetentionModule,
+    CronModule,
   ],
 })
 export class AppModule {}

@@ -4,6 +4,7 @@ import {
   ValidateNested,
   IsInt,
   IsOptional,
+  IsBoolean,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -68,4 +69,30 @@ export class CreatePlanDto {
   @ValidateNested({ each: true })
   @Type(() => WorkoutDto)
   workouts: WorkoutDto[];
+}
+
+// New DTO for creating plans with weeks (template-style)
+export class CreatePlanWithWeeksDto {
+  @IsString()
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsInt()
+  @Min(1)
+  durationWeeks: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isTemplate?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  basePrice?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }

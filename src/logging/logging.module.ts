@@ -3,9 +3,14 @@ import { LoggingController } from './logging.controller';
 import { LoggingService } from './logging.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RetentionModule } from '../retention/retention.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => NotificationsModule)],
+  imports: [
+    PrismaModule,
+    forwardRef(() => NotificationsModule),
+    RetentionModule,
+  ],
   controllers: [LoggingController],
   providers: [LoggingService],
   exports: [LoggingService],

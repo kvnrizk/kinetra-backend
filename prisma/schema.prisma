@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // =============================================
@@ -19,6 +20,7 @@ enum UserRole {
   TRAINER
   PHYSIO
   BOTH
+  ADMIN
 }
 
 enum RelationshipStatus {
@@ -55,6 +57,11 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // Streak & retention tracking
+  lastWorkoutAt   DateTime?
+  currentStreak   Int       @default(0)
+  longestStreak   Int       @default(0)
+
   // Relations
   clientProfile   ClientProfile?
   trainerProfile  TrainerProfile?
@@ -73,6 +80,15 @@ model User {
   clientSubscriptions  StripeSubscription[] @relation("ClientStripeSubscriptions")
   trainerSubscriptions StripeSubscription[] @relation("TrainerStripeSubscriptions")
   payouts              Payout[]
+
+  // Whish Money relations (Lebanon)
+  clientWhishPayments  WhishPayment[] @relation("ClientWhishPayments")
+  trainerWhishPayments WhishPayment[] @relation("TrainerWhishPayments")
+  trainerPayouts       TrainerPayout[] @relation("TrainerPayouts")
+
+  // Analytics relations
+  bodyMetrics          UserBodyMetric[]
+  personalRecords      ExercisePersonalRecord[]
 }
 
 // =============================================
@@ -250,6 +266,7 @@ model Exercise {
   workoutExercises WorkoutExercise[]
   videos           TrainerVideo[]
   setLogs          UserSetLog[]
+  personalRecords  ExercisePersonalRecord[]
 }
 
 model ExerciseMuscle {
@@ -332,6 +349,8 @@ model PlanWeekWorkout {
   dayOfWeek   Int    // 1=Mon ... 7=Sun
   orderIndex  Int
   notes       String?
+
+  sessions    WorkoutSession[] // Track sessions for this specific day's workout
 }
 
 model WorkoutExercise {
@@ -551,14 +570,16 @@ model Notification {
 // =============================================
 
 model WorkoutSession {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation("ClientWorkoutSessions", fields: [userId], references: [id], onDelete: Cascade)
-  workoutId   String
-  workout     Workout   @relation("WorkoutSessions", fields: [workoutId], references: [id], onDelete: Cascade)
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
-  status      String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation("ClientWorkoutSessions", fields: [userId], references: [id], onDelete: Cascade)
+  workoutId          String
+  workout            Workout   @relation("WorkoutSessions", fields: [workoutId], references: [id], onDelete: Cascade)
+  planWeekWorkoutId  String?   // Track which specific day's workout was completed
+  planWeekWorkout    PlanWeekWorkout? @relation(fields: [planWeekWorkoutId], references: [id], onDelete: SetNull)
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  status             String    @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
 
   logs        SetLog[]
   feedback    String?   // General notes from client
@@ -611,6 +632,7 @@ model PricingPlan {
   updatedAt   DateTime @updatedAt
 
   stripeSubscriptions StripeSubscription[]
+  whishPayments       WhishPayment[]
 }
 
 model StripeSubscription {
@@ -655,4 +677,79 @@ model Payout {
   status          String    // pending, in_transit, paid, failed, canceled
   arrivalDate     DateTime?
   createdAt       DateTime  @default(now())
+}
+
+// =============================================
+// WHISH MONEY PAYMENTS (Lebanon)
+// =============================================
+
+model WhishPayment {
+  id              String    @id @default(uuid())
+  clientId        String
+  client          User      @relation("ClientWhishPayments", fields: [clientId], references: [id], onDelete: Cascade)
+  trainerId       String
+  trainer         User      @relation("TrainerWhishPayments", fields: [trainerId], references: [id], onDelete: Cascade)
+  planId          String?
+  plan            PricingPlan? @relation(fields: [planId], references: [id])
+  amount          Int       // in cents (USD equivalent)
+  currency        String    @default("USD")
+  receiptUrl      String    // Uploaded receipt image
+  whishReference  String?   // Whish transaction reference
+  status          String    @default("pending") // pending, approved, rejected
+  rejectionReason String?
+  approvedBy      String?   // Admin user ID who approved
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model TrainerPayout {
+  id              String    @id @default(uuid())
+  trainerId       String
+  trainer         User      @relation("TrainerPayouts", fields: [trainerId], references: [id], onDelete: Cascade)
+  amount          Int       // in cents
+  currency        String    @default("USD")
+  method          String    @default("whish") // whish, bank_transfer, cash
+  whishNumber     String?   // Trainer's Whish number
+  status          String    @default("pending") // pending, paid
+  paidBy          String?   // Admin user ID who marked as paid
+  paidAt          DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// =============================================
+// ANALYTICS & PROGRESS TRACKING
+// =============================================
+
+model UserBodyMetric {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weight     Float?   // kg
+  bodyFat    Float?   // percentage
+  muscleMass Float?   // kg
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ExercisePersonalRecord {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exerciseId     String
+  exercise       Exercise @relation(fields: [exerciseId], references: [id])
+  weight         Float    // kg
+  reps           Int
+  estimatedOneRm Float    // calculated using Brzycki formula
+  achievedAt     DateTime @default(now())
+
+  @@unique([userId, exerciseId])
+  @@index([userId])
+  @@index([exerciseId])
 }

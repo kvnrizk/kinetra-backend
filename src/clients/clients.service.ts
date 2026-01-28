@@ -1,9 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateClientProfileDto } from './dto/update-client-profile.dto';
+import { CreateMeasurementDto } from './dto/create-measurement.dto';
 
 @Injectable()
 export class ClientsService {
   constructor(private prisma: PrismaService) {}
+
+  async upsertClientProfile(userId: string, dto: UpdateClientProfileDto) {
+    return this.prisma.clientProfile.upsert({
+      where: { userId },
+      update: {
+        mainGoal: dto.mainGoal,
+        experienceLevel: dto.experienceLevel,
+        daysPerWeek: dto.daysPerWeek,
+        hasMedicalIssues: dto.hasMedicalIssues,
+        medicalNotes: dto.medicalNotes,
+      },
+      create: {
+        userId,
+        mainGoal: dto.mainGoal,
+        experienceLevel: dto.experienceLevel,
+        daysPerWeek: dto.daysPerWeek,
+        hasMedicalIssues: dto.hasMedicalIssues,
+        medicalNotes: dto.medicalNotes,
+      },
+    });
+  }
+
+  async createMeasurement(userId: string, dto: CreateMeasurementDto) {
+    return this.prisma.bodyMeasurement.create({
+      data: {
+        userId,
+        weightKg: dto.weightKg,
+        heightCm: dto.heightCm,
+        notes: dto.notes,
+        source: 'manual',
+      },
+    });
+  }
 
   async findById(clientId: string) {
     return this.prisma.clientProfile.findUnique({

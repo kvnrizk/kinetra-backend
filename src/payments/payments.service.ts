@@ -529,4 +529,276 @@ export class PaymentsService {
         console.log(`Unhandled event type: ${event.type}`);
     }
   }
+
+  // =============================================
+  // WHISH MONEY (Lebanon) - Client Methods
+  // =============================================
+
+  /**
+   * Submit a Whish payment receipt for approval
+   */
+  async submitWhishPayment(
+    clientId: string,
+    dto: {
+      trainerId: string;
+      planId?: string;
+      amount: number;
+      receiptUrl: string;
+      whishReference?: string;
+    },
+  ) {
+    // Verify trainer exists
+    const trainer = await this.prisma.user.findUnique({
+      where: { id: dto.trainerId },
+    });
+
+    if (!trainer) {
+      throw new NotFoundException('Trainer not found');
+    }
+
+    return this.prisma.whishPayment.create({
+      data: {
+        clientId,
+        trainerId: dto.trainerId,
+        planId: dto.planId,
+        amount: dto.amount,
+        receiptUrl: dto.receiptUrl,
+        whishReference: dto.whishReference,
+        status: 'pending',
+      },
+      include: {
+        trainer: {
+          select: { id: true, fullName: true },
+        },
+        plan: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Get client's Whish payment history
+   */
+  async getClientWhishPayments(clientId: string) {
+    return this.prisma.whishPayment.findMany({
+      where: { clientId },
+      include: {
+        trainer: {
+          select: { id: true, fullName: true, avatarUrl: true },
+        },
+        plan: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // =============================================
+  // ADMIN - Finance Dashboard
+  // =============================================
+
+  /**
+   * Get admin finance statistics
+   */
+  async getAdminStats() {
+    // Total revenue from approved Whish payments
+    const approvedPayments = await this.prisma.whishPayment.findMany({
+      where: { status: 'approved' },
+    });
+    const totalRevenue = approvedPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    // Pending payments count
+    const pendingCount = await this.prisma.whishPayment.count({
+      where: { status: 'pending' },
+    });
+
+    // Approved this month
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const approvedThisMonth = await this.prisma.whishPayment.count({
+      where: {
+        status: 'approved',
+        approvedAt: { gte: startOfMonth },
+      },
+    });
+
+    // Pending payouts total
+    const pendingPayouts = await this.prisma.trainerPayout.aggregate({
+      where: { status: 'pending' },
+      _sum: { amount: true },
+    });
+
+    return {
+      totalRevenue,
+      pendingCount,
+      approvedThisMonth,
+      pendingPayoutAmount: pendingPayouts._sum.amount || 0,
+    };
+  }
+
+  /**
+   * Get pending Whish payments for admin review
+   */
+  async getPendingWhishPayments() {
+    return this.prisma.whishPayment.findMany({
+      where: { status: 'pending' },
+      include: {
+        client: {
+          select: { id: true, fullName: true, avatarUrl: true },
+        },
+        trainer: {
+          select: { id: true, fullName: true, avatarUrl: true },
+        },
+        plan: {
+          select: { id: true, name: true, price: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' }, // Oldest first
+    });
+  }
+
+  /**
+   * Approve a Whish payment
+   */
+  async approveWhishPayment(paymentId: string, adminUserId: string) {
+    const payment = await this.prisma.whishPayment.findUnique({
+      where: { id: paymentId },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+
+    if (payment.status !== 'pending') {
+      throw new BadRequestException('Payment is not pending');
+    }
+
+    // Update payment status
+    const updatedPayment = await this.prisma.whishPayment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'approved',
+        approvedBy: adminUserId,
+        approvedAt: new Date(),
+      },
+      include: {
+        client: { select: { id: true, fullName: true } },
+        trainer: { select: { id: true, fullName: true } },
+      },
+    });
+
+    // Calculate trainer's share (90% - 10% platform fee)
+    const trainerAmount = Math.round(payment.amount * 0.90);
+
+    // Create or update pending payout for trainer
+    const existingPayout = await this.prisma.trainerPayout.findFirst({
+      where: {
+        trainerId: payment.trainerId,
+        status: 'pending',
+      },
+    });
+
+    if (existingPayout) {
+      // Add to existing pending payout
+      await this.prisma.trainerPayout.update({
+        where: { id: existingPayout.id },
+        data: {
+          amount: existingPayout.amount + trainerAmount,
+        },
+      });
+    } else {
+      // Create new pending payout
+      await this.prisma.trainerPayout.create({
+        data: {
+          trainerId: payment.trainerId,
+          amount: trainerAmount,
+          currency: payment.currency,
+          status: 'pending',
+        },
+      });
+    }
+
+    return updatedPayment;
+  }
+
+  /**
+   * Reject a Whish payment
+   */
+  async rejectWhishPayment(paymentId: string, reason?: string) {
+    const payment = await this.prisma.whishPayment.findUnique({
+      where: { id: paymentId },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+
+    if (payment.status !== 'pending') {
+      throw new BadRequestException('Payment is not pending');
+    }
+
+    return this.prisma.whishPayment.update({
+      where: { id: paymentId },
+      data: {
+        status: 'rejected',
+        rejectionReason: reason,
+        rejectedAt: new Date(),
+      },
+      include: {
+        client: { select: { id: true, fullName: true } },
+        trainer: { select: { id: true, fullName: true } },
+      },
+    });
+  }
+
+  /**
+   * Get all trainer payouts for admin
+   */
+  async getTrainerPayouts() {
+    return this.prisma.trainerPayout.findMany({
+      include: {
+        trainer: {
+          select: { id: true, fullName: true, avatarUrl: true },
+        },
+      },
+      orderBy: [
+        { status: 'asc' }, // pending first
+        { createdAt: 'desc' },
+      ],
+    });
+  }
+
+  /**
+   * Mark a trainer payout as paid
+   */
+  async markPayoutPaid(payoutId: string, adminUserId: string, notes?: string) {
+    const payout = await this.prisma.trainerPayout.findUnique({
+      where: { id: payoutId },
+    });
+
+    if (!payout) {
+      throw new NotFoundException('Payout not found');
+    }
+
+    if (payout.status === 'paid') {
+      throw new BadRequestException('Payout already marked as paid');
+    }
+
+    return this.prisma.trainerPayout.update({
+      where: { id: payoutId },
+      data: {
+        status: 'paid',
+        paidBy: adminUserId,
+        paidAt: new Date(),
+        notes: notes || payout.notes,
+      },
+      include: {
+        trainer: { select: { id: true, fullName: true } },
+      },
+    });
+  }
 }

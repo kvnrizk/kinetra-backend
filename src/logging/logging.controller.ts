@@ -3,12 +3,14 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { CurrentUser, JwtUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { LoggingService } from './logging.service';
 import { CompleteSessionDto } from './dto/complete-session.dto';
@@ -90,5 +92,21 @@ export class LoggingController {
   @Get('trainer/pain-flags')
   getPainFlaggedSessions(@Request() req: AuthenticatedRequest) {
     return this.loggingService.getPainFlaggedSessions(req.user.userId);
+  }
+
+  // Get session details (for trainers viewing client sessions)
+  @Get('session/:id')
+  getSessionDetails(@Param('id') id: string) {
+    console.log('GET /logging/session/:id called with id:', id);
+    return this.loggingService.getSessionDetails(id);
+  }
+
+  // Delete a workout session (owner or their trainer can delete)
+  @Delete('sessions/:id')
+  deleteSession(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.loggingService.deleteSession(id, user.userId);
   }
 }

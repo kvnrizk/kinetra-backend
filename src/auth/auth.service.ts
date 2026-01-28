@@ -29,11 +29,15 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    // Create user
+    // Create user with profiles included (will be null for new user)
     const user = await this.prisma.user.create({
       data: {
         email: dto.email.toLowerCase(),
         password: hashedPassword,
+      },
+      include: {
+        clientProfile: true,
+        trainerProfile: true,
       },
     });
 
@@ -41,9 +45,13 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    // Find user
+    // Find user with profiles
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
+      include: {
+        clientProfile: true,
+        trainerProfile: true,
+      },
     });
 
     if (!user) {
@@ -95,6 +103,9 @@ export class AuthService {
       role: user.role,
     };
 
+    // Determine if onboarding is complete based on role
+    const hasCompletedOnboarding = this.checkOnboardingComplete(user);
+
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -102,7 +113,35 @@ export class AuthService {
         email: user.email,
         role: user.role,
         fullName: user.fullName,
+        hasCompletedOnboarding,
+        hasClientProfile: !!user.clientProfile,
+        hasTrainerProfile: !!user.trainerProfile,
       },
     };
+  }
+
+  private checkOnboardingComplete(user: any): boolean {
+    // Admin users don't need onboarding
+    if (user.role === 'ADMIN') {
+      return true;
+    }
+
+    // Clients need a client profile
+    if (user.role === 'CLIENT') {
+      return !!user.clientProfile;
+    }
+
+    // Trainers need a trainer profile
+    if (user.role === 'TRAINER') {
+      return !!user.trainerProfile;
+    }
+
+    // BOTH role needs both profiles
+    if (user.role === 'BOTH') {
+      return !!user.clientProfile && !!user.trainerProfile;
+    }
+
+    // Default: check if fullName exists (basic info)
+    return !!user.fullName;
   }
 }
